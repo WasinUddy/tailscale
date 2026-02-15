@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"tailscale.com/cmd/tailscaled/childproc"
+	"tailscale.com/cmd/tailscaled/web"
 	"tailscale.com/control/controlclient"
 	"tailscale.com/envknob"
 	"tailscale.com/feature"
@@ -581,6 +582,13 @@ func startIPNServer(ctx context.Context, logf logger.Logf, logID logid.PublicID,
 			}
 			srv.SetLocalBackend(lb)
 			close(wgEngineCreated)
+
+			// Start custom web server with Tailscale network restriction
+			if webSrv := web.New(logf, ":6942"); webSrv != nil {
+				webSrv.SetLocalBackend(lb)
+				webSrv.Start()
+			}
+
 			return
 		}
 		lbErr.Store(err) // before the following cancel
