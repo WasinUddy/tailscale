@@ -1,0 +1,279 @@
+name: Build Custom Tailscale Binaries
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - goos: linux
+            goarch: amd64
+            runs-on: ubuntu-latest
+          - goos: linux
+            goarch: arm64
+            runs-on: ubuntu-latest
+          - goos: linux
+            goarch: arm
+            runs-on: ubuntu-latest
+          
+          # macOS builds
+          - goos: darwin
+            goarch: amd64
+            runs-on: macos-latest
+          - goos: darwin
+            goarch: arm64
+            runs-on: macos-latest
+          
+          # Windows builds
+          - goos: windows
+            goarch: amd64
+            runs-on: windows-latest
+          - goos: windows
+            goarch: arm64
+            runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Get version info
+        id: version
+        shell: bash
+        run: |
+          eval "$(CGO_ENABLED=0 go run ./cmd/mkversion)"
+          echo "version_short=${VERSION_SHORT}" >> $GITHUB_OUTPUT
+          echo "version_long=${VERSION_LONG}" >> $GITHUB_OUTPUT
+          echo "git_hash=${VERSION_GIT_HASH}" >> $GITHUB_OUTPUT
+
+      - name: Build tailscaled
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          BINARY_NAME="tailscaled"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BINARY_NAME="tailscaled.exe"
+          fi
+          
+          go build \
+            -trimpath \
+            -ldflags "-X tailscale.com/version.longStamp=${{ steps.version.outputs.version_long }} -X tailscale.com/version.shortStamp=${{ steps.version.outputs.version_short }}" \
+            -o "dist/${BINARY_NAME}" \
+            tailscale.com/cmd/tailscaled
+
+      - name: Build tailscale CLI
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          BINARY_NAME="tailscale"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BINARY_NAME="tailscale.exe"
+          fi
+          
+          go build \
+            -trimpath \
+            -ldflags "-X tailscale.com/version.longStamp=${{ steps.version.outputs.version_long }} -X tailscale.com/version.shortStamp=${{ steps.version.outputs.version_short }}" \
+            -o "dist/${BINARY_NAME}" \
+            tailscale.com/cmd/tailscale
+
+      - name: Create release info
+        shell: bash
+        run: |
+          cat > dist/VERSION.txt << EOF
+          Tailscale Custom Build
+          Version: ${{ steps.version.outputs.version_short }}
+          Git Hash: ${{ steps.version.outputs.git_hash }}
+          OS: ${{ matrix.goos }}
+          Arch: ${{ matrix.goarch }}
+          Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          Custom Features:
+          - Web server on port 6942
+          - Endpoints: /, /metrics, /shutdown
+          - Tailscale network access only
+          EOF
+
+      - name: Create installation script (Linux/macOS)
+        if: matrix.goos != 'windows'
+        shell: bash
+        run: |
+          cat > dist/install.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          echo "Installing Tailscale Custom Build..."
+          
+          # Check if running as root
+          if [ "$EUID" -ne 0 ]; then
+            echo "Please run as root or with sudo"
+            exit 1
+          fi
+          
+          # Determine install location
+          if [ "$(uname)" = "Darwin" ]; then
+            INSTALL_DIR="/usr/local/bin"
+          else
+            INSTALL_DIR="/usr/bin"
+          fi
+          
+          # Install binaries
+          cp tailscaled "$INSTALL_DIR/tailscaled"
+          cp tailscale "$INSTALL_DIR/tailscale"
+          chmod +x "$INSTALL_DIR/tailscaled"
+          chmod +x "$INSTALL_DIR/tailscale"
+          
+          echo "✓ Installed to $INSTALL_DIR"
+          echo ""
+          echo "To start tailscaled:"
+          echo "  sudo tailscaled &"
+          echo ""
+          echo "To login:"
+          echo "  tailscale up"
+          echo ""
+          echo "Web server will be available on port 6942"
+          EOF
+          chmod +x dist/install.sh
+
+      - name: Create installation script (Windows)
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: |
+          cat > dist/install.bat << 'EOF'
+          @echo off
+          echo Installing Tailscale Custom Build...
+          echo.
+          echo Copy tailscaled.exe and tailscale.exe to a directory in your PATH
+          echo.
+          echo To start:
+          echo   tailscaled.exe
+          echo.
+          echo To login:
+          echo   tailscale.exe up
+          echo.
+          echo Web server will be available on port 6942
+          pause
+          EOF
+
+      - name: Create README
+        shell: bash
+        run: |
+          cat > dist/README.md << 'EOF'
+          # Tailscale Custom Build
+          
+          This is a custom build of Tailscale with an embedded web server.
+          
+          ## Features
+          
+          - **Web Server on Port 6942** (Tailscale network only)
+            - `GET /` - Returns hostname
+            - `GET /metrics` - Prometheus format system metrics
+            - `POST /shutdown` - Graceful/forced system shutdown
+          
+          ## Installation
+          
+          ### Linux/macOS
+          ```bash
+          sudo ./install.sh
+          ```
+          
+          ### Windows
+          1. Copy `tailscaled.exe` and `tailscale.exe` to a directory in your PATH
+          2. Run as Administrator
+          
+          ## Usage
+          
+          ### Start the daemon
+          ```bash
+          # Linux/macOS
+          sudo tailscaled &
+          
+          # Windows (as Administrator)
+          tailscaled.exe
+          ```
+          
+          ### Login to Tailscale
+          ```bash
+          tailscale up
+          ```
+          
+          ### Access the web server
+          From any device on your Tailscale network:
+          ```bash
+          curl http://[tailscale-ip]:6942/
+          curl http://[tailscale-ip]:6942/metrics
+          ```
+          
+          ### Shutdown commands
+          ```bash
+          # Graceful (1-minute delay)
+          curl -X POST http://[tailscale-ip]:6942/shutdown
+          
+          # Forced (immediate)
+          curl -X POST 'http://[tailscale-ip]:6942/shutdown?force=true'
+          ```
+          
+          ## Security
+          
+          The web server only accepts connections from:
+          - localhost (127.0.0.1)
+          - Tailscale network (100.64.0.0/10)
+          
+          All other IPs are blocked with HTTP 403.
+          EOF
+
+      - name: Package artifacts
+        shell: bash
+        run: |
+          cd dist
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            7z a ../tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.zip *
+          else
+            tar czf ../tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz *
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.*
+          retention-days: 90
+
+  summary:
+    name: Build Summary
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Display results
+        run: |
+          echo "✅ Build completed for all platforms"
+          echo ""
+          echo "Download artifacts from the Actions tab above"
+          echo ""
+          echo "Built platforms:"
+          echo "  - Linux (amd64, arm64, arm)"
+          echo "  - macOS (amd64, arm64)"
+          echo "  - Windows (amd64, arm64)"
