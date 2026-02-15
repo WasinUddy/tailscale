@@ -4,6 +4,65 @@ https://tailscale.com
 
 Private WireGuard® networks made easy
 
+## 🔧 Custom Fork Modifications
+
+This fork includes custom modifications to the tailscaled daemon:
+
+### **Embedded Web Server (Port 6942)**
+
+A custom web server has been added to `tailscaled` that provides system monitoring and management capabilities, accessible only from within your Tailscale network.
+
+**Features:**
+- **`GET /`** - Returns the hostname of the machine
+- **`GET /metrics`** - Exports system metrics in Prometheus format:
+  - CPU usage percentage
+  - Memory usage (bytes and percentage)
+  - Disk usage (bytes and percentage)  
+  - Network statistics (bytes sent/received)
+  - System uptime in seconds
+- **`POST /shutdown`** - Graceful or forced system shutdown
+  - `?force=false` (default) - Graceful shutdown with 1-minute delay
+  - `?force=true` - Immediate forced shutdown
+
+**Security:**
+- 🔒 Only accessible from Tailscale network (100.64.0.0/10) or localhost
+- Requests from non-Tailscale IPs are blocked with HTTP 403
+- All endpoints validate source IP on every request
+
+**Cross-platform support:**
+- ✅ macOS - Uses system commands and syscalls
+- ✅ Linux - Reads from /proc filesystem
+- ✅ Windows - Uses Win32 APIs
+
+**Usage:**
+```bash
+# From localhost
+curl http://localhost:6942/metrics
+
+# From another Tailscale device
+curl http://[tailscale-ip]:6942/metrics
+
+# Graceful shutdown (1-minute delay)
+curl -X POST http://[tailscale-ip]:6942/shutdown
+
+# Force immediate shutdown
+curl -X POST 'http://[tailscale-ip]:6942/shutdown?force=true'
+```
+
+**Implementation:**
+- Code: `cmd/tailscaled/web/`
+- Documentation: `cmd/tailscaled/web/README.md`
+- Clean architecture with platform-specific implementations
+
+**Building this fork:**
+```bash
+go install tailscale.com/cmd/tailscaled
+```
+
+The web server automatically starts when tailscaled launches and binds to port 6942.
+
+---
+
 ## Overview
 
 This repository contains the majority of Tailscale's open source code.
