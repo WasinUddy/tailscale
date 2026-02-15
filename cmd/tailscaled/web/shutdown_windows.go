@@ -6,14 +6,15 @@
 package web
 
 import (
-	"syscall"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 var (
-	advapi32                  = syscall.NewLazyDLL("advapi32.dll")
-	user32                    = syscall.NewLazyDLL("user32.dll")
+	advapi32                  = windows.NewLazySystemDLL("advapi32.dll")
+	user32                    = windows.NewLazySystemDLL("user32.dll")
 	procOpenProcessToken      = advapi32.NewProc("OpenProcessToken")
 	procLookupPrivilegeValue  = advapi32.NewProc("LookupPrivilegeValueW")
 	procAdjustTokenPrivileges = advapi32.NewProc("AdjustTokenPrivileges")
@@ -48,8 +49,11 @@ func shutdownSystem(force bool) error {
 	time.Sleep(100 * time.Millisecond)
 
 	// Get current process token
-	var token syscall.Token
-	proc := syscall.CurrentProcess()
+	var token windows.Token
+	proc, err := windows.GetCurrentProcess()
+	if err != nil {
+		return err
+	}
 
 	ret, _, err := procOpenProcessToken.Call(
 		uintptr(proc),
@@ -59,11 +63,11 @@ func shutdownSystem(force bool) error {
 	if ret == 0 {
 		return err
 	}
-	defer syscall.CloseHandle(syscall.Handle(token))
+	defer windows.CloseHandle(windows.Handle(token))
 
 	// Lookup shutdown privilege
 	var luid LUID
-	name, err := syscall.UTF16PtrFromString("SeShutdownPrivilege")
+	name, err := windows.UTF16PtrFromString("SeShutdownPrivilege")
 	if err != nil {
 		return err
 	}
