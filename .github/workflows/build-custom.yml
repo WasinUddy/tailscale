@@ -6,36 +6,31 @@ on:
 jobs:
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
-    runs-on: ${{ matrix.runs-on }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         include:
           # Linux builds
           - goos: linux
             goarch: amd64
-            runs-on: ubuntu-latest
           - goos: linux
             goarch: arm64
-            runs-on: ubuntu-latest
           - goos: linux
             goarch: arm
-            runs-on: ubuntu-latest
           
           # macOS builds
           - goos: darwin
             goarch: amd64
-            runs-on: macos-latest
           - goos: darwin
             goarch: arm64
-            runs-on: macos-latest
           
           # Windows builds
           - goos: windows
             goarch: amd64
-            runs-on: windows-latest
           - goos: windows
             goarch: arm64
-            runs-on: windows-latest
 
     steps:
       - name: Checkout code
@@ -55,6 +50,13 @@ jobs:
           echo "version_short=${VERSION_SHORT}" >> $GITHUB_OUTPUT
           echo "version_long=${VERSION_LONG}" >> $GITHUB_OUTPUT
           echo "git_hash=${VERSION_GIT_HASH}" >> $GITHUB_OUTPUT
+
+      - name: Build info
+        run: |
+          echo "Building for ${{ matrix.goos }}/${{ matrix.goarch }}"
+          echo "Version: ${{ steps.version.outputs.version_short }}"
+          echo "Git hash: ${{ steps.version.outputs.git_hash }}"
+          go version
 
       - name: Build tailscaled
         shell: bash
@@ -243,7 +245,7 @@ jobs:
         run: |
           cd dist
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            7z a ../tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.zip *
+            zip -r ../tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.zip *
           else
             tar czf ../tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz *
           fi
