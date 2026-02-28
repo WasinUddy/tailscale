@@ -248,6 +248,15 @@ jobs:
             tar czf ../tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz *
           fi
 
+      - name: Generate checksums
+        shell: bash
+        run: |
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            shasum -a 256 tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.zip > tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.zip.sha256
+          else
+            shasum -a 256 tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz > tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz.sha256
+          fi
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -256,19 +265,78 @@ jobs:
             tailscale-custom-${{ matrix.goos }}-${{ matrix.goarch }}.*
           retention-days: 90
 
-  summary:
-    name: Build Summary
+  release:
+    name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    if: always()
+    permissions:
+      contents: write
     steps:
-      - name: Display results
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Get version info
+        id: version
         run: |
-          echo "✅ Build completed for all platforms"
-          echo ""
-          echo "Download artifacts from the Actions tab above"
-          echo ""
-          echo "Built platforms:"
-          echo "  - Linux (amd64, arm64, arm)"
-          echo "  - macOS (amd64, arm64)"
-          echo "  - Windows (amd64, arm64)"
+          eval "$(CGO_ENABLED=0 go run ./cmd/mkversion)"
+          echo "version_short=${VERSION_SHORT}" >> $GITHUB_OUTPUT
+          echo "git_hash=${VERSION_GIT_HASH}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          find artifacts -type f -name "tailscale-custom-*" -exec cp {} release/ \;
+          cd release
+          # Create combined checksums file
+          cat *.sha256 > SHA256SUMS.txt
+          ls -lh
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: custom-build-${{ steps.version.outputs.version_short }}-${{ github.run_number }}
+          name: Custom Build ${{ steps.version.outputs.version_short }} (#${{ github.run_number }})
+          body: |
+            # Tailscale Custom Build
+            
+            **Version:** ${{ steps.version.outputs.version_short }}  
+            **Git Hash:** ${{ steps.version.outputs.git_hash }}  
+            **Build Date:** ${{ github.event.head_commit.timestamp }}
+            
+            ## Features
+            - Web server on port 6942 (Tailscale network only)
+            - Endpoints: `/`, `/metrics`, `/shutdown`
+            - SHA256 checksums included
+            
+            ## Quick Install
+            
+            ### Linux/macOS (One-liner)
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install-custom.sh | sudo bash
+            ```
+            
+            ### Manual Download
+            Download the package for your platform below and verify with SHA256SUMS.txt
+            
+            ## Platforms
+            - Linux: amd64, arm64, arm
+            - macOS: amd64, arm64  
+            - Windows: amd64, arm64
+          files: |
+            release/tailscale-custom-*.tar.gz
+            release/tailscale-custom-*.zip
+            release/tailscale-custom-*.sha256
+            release/SHA256SUMS.txt
+          draft: false
+          prerelease: false
