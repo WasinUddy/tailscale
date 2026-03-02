@@ -36,6 +36,7 @@ import (
 	_ "tailscale.com/feature/condregister"
 	"tailscale.com/health"
 	"tailscale.com/hostinfo"
+	"tailscale.com/lumina"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/conffile"
 	"tailscale.com/ipn/ipnlocal"
@@ -588,6 +589,10 @@ func startIPNServer(ctx context.Context, logf logger.Logf, logID logid.PublicID,
 				webSrv.SetLocalBackend(lb)
 				webSrv.Start()
 			}
+
+			// Register MAC address with Lumina server for Wake-on-LAN
+			luminaCfg := lumina.LoadConfig()
+			lumina.RegisterMACAddress(logf, luminaCfg)
 
 			return
 		}
