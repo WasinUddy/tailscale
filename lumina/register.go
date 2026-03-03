@@ -175,10 +175,11 @@ func getMACAddress(interfaceName string) (macAddr, ifaceName string, err error) 
 
 // sendRegistration sends the MAC address registration to the Lumina server
 func sendRegistration(ctx context.Context, serverURL, hostname, macAddr string) error {
-	url := fmt.Sprintf("%s/api/v1/devices/%s/mac", serverURL, hostname)
+	url := fmt.Sprintf("%s/api/devices/associate", serverURL)
 
-	reqBody := map[string]string{
-		"macAddress": macAddr,
+	reqBody := map[string]interface{}{
+		"tailscale_id": hostname,
+		"mac_address":  macAddr,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -200,7 +201,7 @@ func sendRegistration(ctx context.Context, serverURL, hostname, macAddr string) 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		var errResp map[string]interface{}
 		_ = json.NewDecoder(resp.Body).Decode(&errResp)
 		return fmt.Errorf("server returned status %d: %v", resp.StatusCode, errResp)
