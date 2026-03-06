@@ -21,7 +21,7 @@ import (
 
 // Config holds configuration for Lumina server integration
 type Config struct {
-	// ServerURL is the Lumina server endpoint (default: http://lumina-server:3000)
+	// ServerURL is the Lumina server endpoint (default: http://lumina-server:80)
 	ServerURL string
 
 	// Hostname is the device hostname to register (auto-detected if empty)
@@ -38,7 +38,7 @@ type Config struct {
 func LoadConfig() *Config {
 	serverURL := envknob.String("TS_LUMINA_SERVER")
 	if serverURL == "" {
-		serverURL = "http://lumina-server:3000"
+		serverURL = "http://lumina-server:80"
 	}
 
 	enabled := envknob.Bool("TS_LUMINA_ENABLED")

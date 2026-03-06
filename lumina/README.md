@@ -12,8 +12,8 @@ The integration is configured via environment variables:
 
 ### `TS_LUMINA_SERVER`
 - **Description**: URL of the Lumina server
-- **Default**: `http://lumina-server:3000`
-- **Example**: `http://192.168.1.100:3000` or `https://lumina.example.com`
+cc- **Default**: `http://lumina-server:80`
+- **Example**: `http://192.168.1.100:80` or `https://lumina.example.com`
 
 ### `TS_LUMINA_ENABLED`
 - **Description**: Explicitly enable/disable Lumina registration
@@ -42,7 +42,7 @@ The integration is configured via environment variables:
 ## Usage Examples
 
 ### Default Configuration (MagicDNS)
-Uses default `lumina-server:3000` which is resolved via Tailscale MagicDNS:
+Uses default `lumina-server:80` which is resolved via Tailscale MagicDNS:
 
 ```bash
 # No configuration needed if lumina-server is in your tailnet
@@ -51,14 +51,14 @@ sudo systemctl start tailscaled
 
 ### Custom Server URL
 ```bash
-export TS_LUMINA_SERVER="http://192.168.1.100:3000"
+export TS_LUMINA_SERVER="http://192.168.1.100:80"
 sudo tailscaled
 ```
 
 ### Explicit Hostname
 Useful when hostname detection doesn't match your Tailscale name:
 ```bash
-export TS_LUMINA_SERVER="http://lumina-server:3000"
+export TS_LUMINA_SERVER="http://lumina-server:80"
 export TS_LUMINA_HOSTNAME="my-custom-name"
 sudo tailscaled
 ```
@@ -66,7 +66,7 @@ sudo tailscaled
 ### Specific Network Interface
 Force MAC address from a specific interface:
 ```bash
-export TS_LUMINA_SERVER="http://lumina-server:3000"
+export TS_LUMINA_SERVER="http://lumina-server:80"
 export TS_LUMINA_INTERFACE="eth0"
 sudo tailscaled
 ```
@@ -90,7 +90,7 @@ Wants=network-pre.target
 
 [Service]
 EnvironmentFile=-/etc/default/tailscaled
-Environment="TS_LUMINA_SERVER=http://lumina-server:3000"
+Environment="TS_LUMINA_SERVER=http://lumina-server:80"
 Environment="TS_LUMINA_ENABLED=true"
 ExecStart=/usr/sbin/tailscaled
 Restart=on-failure
@@ -107,7 +107,7 @@ WantedBy=multi-user.target
 
 Or use `/etc/default/tailscaled`:
 ```bash
-TS_LUMINA_SERVER=http://lumina-server:3000
+TS_LUMINA_SERVER=http://lumina-server:80
 TS_LUMINA_ENABLED=true
 ```
 
@@ -116,7 +116,7 @@ TS_LUMINA_ENABLED=true
 ```dockerfile
 FROM tailscale/tailscale:latest
 
-ENV TS_LUMINA_SERVER=http://lumina-server:3000
+ENV TS_LUMINA_SERVER=http://lumina-server:80
 ENV TS_LUMINA_ENABLED=true
 
 CMD ["tailscaled"]
@@ -128,7 +128,7 @@ services:
   tailscale:
     image: tailscale/tailscale:latest
     environment:
-      TS_LUMINA_SERVER: http://lumina-server:3000
+      TS_LUMINA_SERVER: http://lumina-server:80
       TS_LUMINA_ENABLED: "true"
       TS_LUMINA_HOSTNAME: my-container
 ```
@@ -137,11 +137,12 @@ services:
 
 The registration sends a POST request to:
 ```
-POST {TS_LUMINA_SERVER}/api/v1/devices/{hostname}/mac
+POST {TS_LUMINA_SERVER}/api/devices/associate
 Content-Type: application/json
 
 {
-  "macAddress": "AA:BB:CC:DD:EE:FF"
+  "tailscale_id": "hostname",
+  "mac_address": "AA:BB:CC:DD:EE:FF"
 }
 ```
 
@@ -190,14 +191,18 @@ Solution: The device must be registered in Tailscale first; ensure it's authoriz
 
 ## Integration with Lumina Server
 
-Once registered, the device can be woken up via the Lumina server:
+Once registered, the device can be woken up via the Lumina server through connected agents:
 
 ```bash
-# Wake by hostname (recommended)
-curl -X POST "http://lumina-server:3000/api/v1/wake?target=my-laptop"
+# Wake device by MAC address via all agents
+curl -X POST "http://lumina-server:80/api/agents/wol" \
+  -H "Content-Type: application/json" \
+  -d '{"mac_address": "AA:BB:CC:DD:EE:FF"}'
 
-# Wake by MAC address (fallback)
-curl -X POST "http://lumina-server:3000/api/v1/wake?target=AA:BB:CC:DD:EE:FF"
+# Wake device by MAC address via specific agent
+curl -X POST "http://lumina-server:80/api/agents/wol" \
+  -H "Content-Type: application/json" \
+  -d '{"mac_address": "AA:BB:CC:DD:EE:FF", "agent_id": "100.64.0.5"}'
 ```
 
 ## Security Considerations
@@ -255,7 +260,7 @@ import (
 
 func main() {
 	cfg := &lumina.Config{
-		ServerURL: "http://localhost:3000",
+		ServerURL: "http://localhost:80",
 		Hostname:  "test-device",
 		Enabled:   true,
 	}
