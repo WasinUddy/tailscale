@@ -36,7 +36,6 @@ import (
 	_ "tailscale.com/feature/condregister"
 	"tailscale.com/health"
 	"tailscale.com/hostinfo"
-	"tailscale.com/lumina"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/conffile"
 	"tailscale.com/ipn/ipnlocal"
@@ -45,6 +44,7 @@ import (
 	"tailscale.com/ipn/store/mem"
 	"tailscale.com/logpolicy"
 	"tailscale.com/logtail"
+	"tailscale.com/lumina"
 	"tailscale.com/net/dns"
 	"tailscale.com/net/dnsfallback"
 	"tailscale.com/net/netmon"
@@ -590,8 +590,19 @@ func startIPNServer(ctx context.Context, logf logger.Logf, logID logid.PublicID,
 				webSrv.Start()
 			}
 
-			// Register MAC address with Lumina server for Wake-on-LAN
+			// Register MAC address with Lumina server for Wake-on-LAN.
+			// Supply a NodeIDFunc so the registration uses the Tailscale stable
+			// node ID (e.g. "nodeXXXXXXX") instead of the OS hostname.  The ID
+			// may not be available immediately if the node is still connecting,
+			// so the function is called lazily inside registerWithRetry.
 			luminaCfg := lumina.LoadConfig()
+			luminaCfg.NodeIDFunc = func() string {
+				st := lb.Status()
+				if st == nil || st.Self == nil {
+					return ""
+				}
+				return string(st.Self.ID)
+			}
 			lumina.RegisterMACAddress(logf, luminaCfg)
 
 			return

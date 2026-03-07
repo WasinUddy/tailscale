@@ -32,6 +32,13 @@ type Config struct {
 
 	// Enabled controls whether registration should happen
 	Enabled bool
+
+	// NodeIDFunc is an optional function that returns the Tailscale stable node ID
+	// (e.g. "nodeXXXXXXX"). When provided, it is used as tailscale_id in the
+	// registration request so the server can correlate the record with the device
+	// returned by the Tailscale API. If the function returns an empty string the
+	// registration loop retries until it becomes available.
+	NodeIDFunc func() string
 }
 
 // LoadConfig loads Lumina configuration from environment variables
@@ -84,7 +91,7 @@ func registerWithRetry(logf logger.Logf, cfg *Config) error {
 	maxAttempts := 5
 	baseDelay := 2 * time.Second
 
-	// Get hostname
+	// Get hostname (used as fallback identifier in logs)
 	hostname := cfg.Hostname
 	if hostname == "" {
 		var err error
@@ -100,13 +107,36 @@ func registerWithRetry(logf logger.Logf, cfg *Config) error {
 		return fmt.Errorf("failed to get MAC address: %w", err)
 	}
 
-	logf("lumina: registering hostname=%s mac=%s interface=%s", hostname, macAddr, iface)
+	// Resolve the Tailscale stable node ID.
+	// If NodeIDFunc is provided we poll until it returns a non-empty value
+	// (the daemon may not be fully connected yet at the time of registration).
+	tailscaleID := hostname // default fallback
+	if cfg.NodeIDFunc != nil {
+		nodeIDMaxWait := 60 * time.Second
+		nodeIDPoll := 2 * time.Second
+		waited := time.Duration(0)
+		for {
+			if id := cfg.NodeIDFunc(); id != "" {
+				tailscaleID = id
+				break
+			}
+			if waited >= nodeIDMaxWait {
+				logf("lumina: timed out waiting for Tailscale node ID, falling back to hostname %s", hostname)
+				break
+			}
+			logf("lumina: waiting for Tailscale node ID (waited %v)...", waited)
+			time.Sleep(nodeIDPoll)
+			waited += nodeIDPoll
+		}
+	}
+
+	logf("lumina: registering tailscale_id=%s mac=%s interface=%s", tailscaleID, macAddr, iface)
 
 	// Retry with exponential backoff
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		err := sendRegistration(ctx, cfg.ServerURL, hostname, macAddr)
+		err := sendRegistration(ctx, cfg.ServerURL, tailscaleID, macAddr)
 		cancel()
 
 		if err == nil {
@@ -174,11 +204,11 @@ func getMACAddress(interfaceName string) (macAddr, ifaceName string, err error) 
 }
 
 // sendRegistration sends the MAC address registration to the Lumina server
-func sendRegistration(ctx context.Context, serverURL, hostname, macAddr string) error {
+func sendRegistration(ctx context.Context, serverURL, tailscaleID, macAddr string) error {
 	url := fmt.Sprintf("%s/api/devices/associate", serverURL)
 
 	reqBody := map[string]interface{}{
-		"tailscale_id": hostname,
+		"tailscale_id": tailscaleID,
 		"mac_address":  macAddr,
 	}
 
