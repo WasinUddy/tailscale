@@ -174,26 +174,22 @@ func getMACAddress(interfaceName string) (macAddr, ifaceName string, err error) 
 		return "", "", fmt.Errorf("interface %s not found", interfaceName)
 	}
 
-	// Auto-detect: prefer Tailscale interface first
+	// Auto-detect: find first suitable physical interface
+	// Note: We don't require an IP address because the interface might be UP
+	// but not yet have an IP assigned (e.g., during boot before DHCP completes)
 	for _, iface := range interfaces {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 || len(iface.HardwareAddr) == 0 {
+		// Skip loopback and interfaces that are down
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
 			continue
 		}
 
-		// Prefer tailscale0 or similar interfaces
-		if iface.Name == "tailscale0" || iface.Name == "utun" {
-			return iface.HardwareAddr.String(), iface.Name, nil
-		}
-	}
-
-	// Fall back to first suitable interface with IP address
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 || len(iface.HardwareAddr) == 0 {
+		// Must have a hardware address
+		if len(iface.HardwareAddr) == 0 {
 			continue
 		}
 
-		addrs, err := iface.Addrs()
-		if err != nil || len(addrs) == 0 {
+		// Skip virtual/container interfaces
+		if isVirtualInterface(iface.HardwareAddr) {
 			continue
 		}
 
@@ -201,6 +197,32 @@ func getMACAddress(interfaceName string) (macAddr, ifaceName string, err error) 
 	}
 
 	return "", "", fmt.Errorf("no suitable network interface found")
+}
+
+// isVirtualInterface checks if a MAC address belongs to a virtual/container interface
+func isVirtualInterface(mac net.HardwareAddr) bool {
+	if len(mac) != 6 {
+		return false
+	}
+
+	// Docker containers (02:42:xx:xx:xx:xx)
+	if mac[0] == 0x02 && mac[1] == 0x42 {
+		return true
+	}
+
+	// Check known virtual OUIs
+	oui := [3]byte{mac[0], mac[1], mac[2]}
+	virtualOUIs := map[[3]byte]bool{
+		{0x00, 0x15, 0x5d}: true, // Hyper-V
+		{0x00, 0x50, 0x56}: true, // VMware
+		{0x00, 0x1c, 0x14}: true, // VMware
+		{0x00, 0x05, 0x69}: true, // VMware
+		{0x00, 0x0c, 0x29}: true, // VMware
+		{0x52, 0x54, 0x00}: true, // QEMU/KVM
+		{0x08, 0x00, 0x27}: true, // VirtualBox
+	}
+
+	return virtualOUIs[oui]
 }
 
 // sendRegistration sends the MAC address registration to the Lumina server
